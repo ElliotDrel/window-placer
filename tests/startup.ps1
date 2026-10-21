@@ -41,7 +41,7 @@ public static class WindowPlacerJobTest {
    var limits=new Limits(); limits.basic.flags=0x2000|0x800; // kill-on-close + allow breakaway
    if(!SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(typeof(Limits)))) throw new Win32Exception();
    var si=new SI();si.cb=(uint)Marshal.SizeOf(typeof(SI));si.flags=1;si.show=0;
-   if(!CreateProcess(app,new StringBuilder("\""+app+"\" "+args),IntPtr.Zero,IntPtr.Zero,false,0x01000014,IntPtr.Zero,null,ref si,out pi)) throw new Win32Exception();
+   if(!CreateProcess(app,new StringBuilder("\""+app+"\" "+args),IntPtr.Zero,IntPtr.Zero,false,0x00000014,IntPtr.Zero,null,ref si,out pi)) throw new Win32Exception();
    if(!AssignProcessToJobObject(job,pi.process)) throw new Win32Exception();
    if(ResumeThread(pi.thread)==0xffffffff) throw new Win32Exception();
    if(WaitForSingleObject(pi.process,30000)!=0) throw new Exception("Installer timed out.");
