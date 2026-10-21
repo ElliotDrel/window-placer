@@ -185,7 +185,9 @@ impl App {
                 self.timers.insert(id, (hwnd, s.token));
             }
             None => {
-                eprintln!("window-placer: could not arm placement timer");
+                crate::diagnostics::error(format_args!(
+                    "window-placer: could not arm placement timer"
+                ));
                 self.timer_failed = true;
             }
         }
@@ -231,7 +233,7 @@ pub fn run(opts: Options) -> i32 {
     let rules = match rules::load(&config) {
         Ok(rules) => rules,
         Err(error) => {
-            eprintln!("window-placer: {error}");
+            crate::diagnostics::error(format_args!("window-placer: {error}"));
             return 1;
         }
     };
@@ -242,11 +244,15 @@ pub fn run(opts: Options) -> i32 {
         match win::acquire_instance_lock() {
             Ok(Some(lock)) => Some(lock),
             Ok(None) => {
-                eprintln!("window-placer: another --apply instance is already running");
+                crate::diagnostics::error(format_args!(
+                    "window-placer: another --apply instance is already running"
+                ));
                 return 2;
             }
             Err(code) => {
-                eprintln!("window-placer: could not create instance mutex (error {code})");
+                crate::diagnostics::error(format_args!(
+                    "window-placer: could not create instance mutex (error {code})"
+                ));
                 return 1;
             }
         }
@@ -257,7 +263,9 @@ pub fn run(opts: Options) -> i32 {
     let hooks = match win::install_hooks() {
         Ok(h) => h,
         Err(code) => {
-            eprintln!("window-placer: SetWinEventHook failed (error {code})");
+            crate::diagnostics::error(format_args!(
+                "window-placer: SetWinEventHook failed (error {code})"
+            ));
             return 1;
         }
     };
@@ -292,7 +300,9 @@ pub fn run(opts: Options) -> i32 {
         .duration_secs
         .and_then(|s| win::set_timer(s.saturating_mul(1000)));
     if opts.duration_secs.is_some() && quit_timer.is_none() {
-        eprintln!("window-placer: could not arm --duration timer");
+        crate::diagnostics::error(format_args!(
+            "window-placer: could not arm --duration timer"
+        ));
         return 1;
     }
 
@@ -301,9 +311,14 @@ pub fn run(opts: Options) -> i32 {
             break 1;
         }
         match win::next_message() {
-            Message::Quit => break 0,
+            Message::Quit => {
+                crate::diagnostics::record("stop requested by Windows message/console control");
+                break 0;
+            }
             Message::Error(code) => {
-                eprintln!("window-placer: GetMessageW failed (error {code})");
+                crate::diagnostics::error(format_args!(
+                    "window-placer: GetMessageW failed (error {code})"
+                ));
                 break 1;
             }
             Message::EventsQueued => {

@@ -3,7 +3,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 use window_placer::app::{self, Command};
-use window_placer::win;
+use window_placer::{diagnostics, win};
 
 fn main() {
     let command = app::parse_args(std::env::args().skip(1));
@@ -12,6 +12,10 @@ fn main() {
     if !matches!(&command, Ok(Command::Run(opts)) if opts.apply) {
         win::attach_parent_console();
     }
+    let background = matches!(&command, Ok(Command::Run(opts)) if opts.apply);
+    if background {
+        diagnostics::start();
+    }
     let code = match command {
         Ok(Command::Help) => {
             print!("{}", app::USAGE);
@@ -19,9 +23,12 @@ fn main() {
         }
         Ok(Command::Run(opts)) => app::run(opts),
         Err(msg) => {
-            eprintln!("window-placer: {msg}\n\n{}", app::USAGE);
+            diagnostics::error(format_args!("window-placer: {msg}\n\n{}", app::USAGE));
             2
         }
     };
+    if background {
+        diagnostics::record(&format!("exiting code={code}"));
+    }
     std::process::exit(code);
 }

@@ -13,3 +13,5 @@ pub mod geometry;
 pub mod rules;
 pub mod tracker;
 pub mod win;
+
+pub mod diagnostics;
