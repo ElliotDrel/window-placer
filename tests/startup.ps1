@@ -67,7 +67,7 @@ try {
  & (Join-Path $source 'scripts\install.ps1') -SourceDirectory $source -InstallDirectory $install -StartupDirectory $startup
  if([IO.File]::ReadAllText($installedConfig) -ne $custom) { throw 'Reinstall overwrote user configuration.' }
  # Setup without StartNow stops this test copy deliberately; start it again.
- & (Join-Path $repo 'scripts\start-shortcut.ps1') -ShortcutPath (Join-Path $startup 'Window Placer.lnk')
+ [WindowPlacerJobTest]::Run((Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),'-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand '+$encoded)
  Start-Sleep -Seconds 2
  $before=& (Join-Path $repo 'scripts\status.ps1') -InstallDirectory $install -StartupDirectory $startup -AsObject
  if(-not $before.Running){throw 'Reinstalled test app did not start.'}
