@@ -1,6 +1,6 @@
 [package]
 name = "window-placer"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2024"
 description = "Places supported app main windows once when they become ready (Windows only)."
 publish = false

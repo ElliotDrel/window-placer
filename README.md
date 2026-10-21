@@ -20,8 +20,8 @@ Get-Content preview.txt
 powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -StartNow
 ```
 
-Install for the current user under `%LOCALAPPDATA%\WindowPlacer`, with a login
-shortcut. Existing installed configuration is preserved. Edit that folder's
+Install for the current user under `%USERPROFILE%\Applications\WindowPlacer`, with a login
+shortcut. Existing configuration is preserved, including migration from the earlier AppData location. Edit that folder's
 `windows.conf`, then rerun the installer to restart with your changes.
 For a portable run, keep the executable and configuration together and launch
 `window-placer.exe --apply`. Stop it in Task Manager or at logoff.
@@ -88,7 +88,7 @@ parent test. CI runs the same checks on Windows.
 - Geometry is tested; real mixed-DPI/multi-monitor hardware needs broader coverage.
 - Use `--duration SECONDS` for a bounded run and `--help` for options.
 - Exit codes: `0` normal, `1` configuration/setup/message-loop failure, `2` bad arguments or duplicate apply instance.
-- Release builds have no console window; redirect output or use `cargo run` for diagnostics.
+- Background apply mode never attaches to the launching terminal. Release builds have no console window; redirect output or use `cargo run` for diagnostics.
 
 ## History and license
 
