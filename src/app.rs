@@ -13,13 +13,13 @@ use std::path::PathBuf;
 pub const USAGE: &str = "\
 window-placer: place supported app windows once, when they first become ready.
 
-USAGE: window-placer [--apply] [--config PATH] [--duration SECONDS]
+USAGE: window-placer [--apply] [--config PATH] [--duration SECONDS] [--trace]
 
   (default)            dry run: log what would be moved, move nothing
   --config PATH        rules file (default: windows.conf beside the executable)
   --apply              really move windows (quiet; one apply instance per session)
   --duration SECONDS   exit after SECONDS (default: run until stopped or logoff)
-  -h, --help           show this help
+  --trace              bounded decision log in window-placer.log (includes titles)\n\n  -h, --help           show this help
 ";
 
 const MAX_DURATION_SECS: u32 = 2_000_000; // SetTimer limit is ~24.8 days
@@ -29,6 +29,7 @@ const MIN_PRUNE_AT: usize = 1024;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Options {
     pub apply: bool,
+    pub trace: bool,
     pub duration_secs: Option<u32>,
     pub config: Option<PathBuf>,
 }
@@ -42,6 +43,7 @@ pub enum Command {
 pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Command, String> {
     let mut opts = Options {
         apply: false,
+        trace: false,
         duration_secs: None,
         config: None,
     };
@@ -50,6 +52,7 @@ pub fn parse_args<I: IntoIterator<Item = String>>(args: I) -> Result<Command, St
         match arg.as_str() {
             "-h" | "--help" | "/?" => return Ok(Command::Help),
             "--apply" => opts.apply = true,
+            "--trace" => opts.trace = true,
             "--config" => {
                 opts.config = Some(PathBuf::from(args.next().ok_or("--config needs a path")?))
             }
@@ -79,6 +82,9 @@ struct Log {
 
 impl Log {
     fn line(&self, args: fmt::Arguments) {
+        if crate::diagnostics::trace_enabled() {
+            crate::diagnostics::record(&format!("trace: {args}"));
+        }
         if !self.enabled {
             return;
         }
@@ -122,6 +128,18 @@ impl App {
         let Some(pid) = win::window_pid(hwnd) else {
             return;
         };
+        if crate::diagnostics::trace_enabled()
+            && let Some(exe) = win::process_exe_name(pid)
+            && let Some(index) = crate::rules::rule_for_exe(&self.rules, &exe)
+        {
+            let (_, why) = win::readiness(hwnd, &self.rules[index]);
+            crate::diagnostics::record(&format!(
+                "trace event: {exe} pid={pid} hwnd={hwnd:#x} tracker={} reason={why} title={:?} plan={:?}",
+                self.tracker.status(hwnd),
+                short(&win::window_title(hwnd)),
+                win::plan(hwnd, self.rules[index].rect)
+            ));
+        }
         let log = &self.log;
         let rules = &self.rules;
         let schedule = self.tracker.on_window_event(
@@ -220,11 +238,23 @@ fn place(hwnd: WindowId, rule: &Rule, apply: bool, log: &Log) -> PlaceOutcome {
     if !apply {
         return PlaceOutcome::Placed;
     }
-    win::move_window(hwnd, t)
+    let (state, reason) = win::readiness(hwnd, rule);
+    if state != Readiness::Ready {
+        log.line(format_args!(
+            "{exe} hwnd {hwnd:#x}: move cancelled ({reason})"
+        ));
+        return PlaceOutcome::Failed;
+    }
+    let outcome = win::move_if_ready(hwnd, rule, t);
+    log.line(format_args!(
+        "{exe} hwnd {hwnd:#x}: placement request {outcome:?}"
+    ));
+    outcome
 }
 
 /// Run until WM_QUIT, Ctrl+C or `--duration` elapses. Returns an exit code.
 pub fn run(opts: Options) -> i32 {
+    crate::diagnostics::set_trace(opts.trace);
     let config = opts.config.clone().unwrap_or_else(|| {
         std::env::current_exe()
             .unwrap_or_default()
@@ -283,13 +313,15 @@ pub fn run(opts: Options) -> i32 {
         prune_at: MIN_PRUNE_AT,
         timer_failed: false,
     };
-    app.log.line(format_args!(
-        "dry run: nothing will be moved (pass --apply to move windows){}",
-        match opts.duration_secs {
-            Some(s) => format!("; exiting after {s}s"),
-            None => "; Ctrl+C to stop".to_owned(),
-        }
-    ));
+    if !opts.apply {
+        app.log.line(format_args!(
+            "dry run: nothing will be moved (pass --apply to move windows){}",
+            match opts.duration_secs {
+                Some(s) => format!("; exiting after {s}s"),
+                None => "; Ctrl+C to stop".to_owned(),
+            }
+        ));
+    }
 
     // Hooks are installed first so no window can slip between the two.
     for hwnd in win::top_level_windows() {
@@ -325,6 +357,12 @@ pub fn run(opts: Options) -> i32 {
                 for ev in win::take_events() {
                     match ev {
                         WinEvent::Changed(h) => app.on_changed(h),
+                        WinEvent::UserMove(h) => {
+                            app.tracker.protect(h);
+                            app.log.line(format_args!(
+                                "hwnd {h:#x}: user move/resize; placement cancelled"
+                            ));
+                        }
                         WinEvent::Destroyed(h) => app.tracker.on_destroy(h),
                         WinEvent::Rescan => {
                             app.tracker.prune(|h, pid| win::window_pid(h) == Some(pid));
@@ -372,6 +410,7 @@ mod tests {
             parse(&[]),
             Ok(Command::Run(Options {
                 apply: false,
+                trace: false,
                 duration_secs: None,
                 config: None
             }))
@@ -384,6 +423,7 @@ mod tests {
             parse(&["--duration", "5", "--apply"]),
             Ok(Command::Run(Options {
                 apply: true,
+                trace: false,
                 duration_secs: Some(5),
                 config: None
             }))
@@ -399,6 +439,14 @@ mod tests {
             opts.config,
             Some(PathBuf::from("C:\\my rules\\windows.conf"))
         );
+    }
+
+    #[test]
+    fn trace_is_explicit_and_opt_in() {
+        let Command::Run(opts) = parse(&["--apply", "--trace"]).unwrap() else {
+            panic!()
+        };
+        assert!(opts.trace && opts.apply);
     }
 
     #[test]

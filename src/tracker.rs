@@ -29,9 +29,9 @@ pub const MAX_ATTEMPTS: u32 = 3;
 pub enum Readiness {
     /// Eligible main window in a normal (restored) state.
     Ready,
-    /// Hidden, untitled or title filter not (yet) matched; may change later.
+    /// Temporarily ineligible (hidden, minimized, tool/owned, title); may change later.
     NotYet,
-    /// Not a main window, or minimized/maximized/fullscreen: leave it alone.
+    /// Maximized/fullscreen/work-area filling: protect for its lifetime.
     Never,
 }
 
@@ -116,8 +116,17 @@ impl Tracker {
             };
             self.entries.insert(hwnd, Entry { pid, state });
         }
-        let State::Waiting { rule } = self.entries[&hwnd].state else {
-            return None;
+        let rule = match self.entries[&hwnd].state {
+            State::Waiting { rule } => rule,
+            State::Pending { rule, .. } => {
+                // A transient maximize/fullscreen during settling must cancel
+                // placement even if the window is restored before the timer.
+                if readiness(rule) == Readiness::Never {
+                    self.set_state(hwnd, State::Done);
+                }
+                return None;
+            }
+            _ => return None,
         };
         match readiness(rule) {
             Readiness::NotYet => None,
@@ -201,6 +210,22 @@ impl Tracker {
                 self.set_state(hwnd, State::Done);
                 None
             }
+        }
+    }
+
+    /// Respect a user's move/resize gesture, including during initial settling.
+    pub fn protect(&mut self, hwnd: isize) {
+        self.set_state(hwnd, State::Done);
+    }
+
+    /// Lightweight debug state; does not inspect other processes.
+    pub fn status(&self, hwnd: isize) -> &'static str {
+        match self.entries.get(&hwnd).map(|e| e.state) {
+            None => "new",
+            Some(State::Ignored) => "unsupported",
+            Some(State::Waiting { .. }) => "waiting",
+            Some(State::Pending { .. }) => "pending",
+            Some(State::Done) => "done (placed or protected)",
         }
     }
 
@@ -442,5 +467,45 @@ mod tests {
         t.prune(|hwnd, _| hwnd == 2);
         assert_eq!(t.len(), 1);
         assert_eq!(t.state(2), Some(State::Ignored));
+    }
+}
+
+#[cfg(test)]
+mod safety_tests {
+    use super::*;
+    #[test]
+    fn protected_state_during_settling_cancels_stale_timer() {
+        let mut t = Tracker::new();
+        let s = t
+            .on_window_event(1, 2, || Some(0), |_| Readiness::Ready)
+            .unwrap();
+        t.on_window_event(1, 2, || unreachable!(), |_| Readiness::Never);
+        t.on_window_event(1, 2, || unreachable!(), |_| Readiness::Ready);
+        assert_eq!(
+            t.on_timer(
+                1,
+                s.token,
+                Some(2),
+                |_| Readiness::Ready,
+                |_| panic!("protected window moved")
+            ),
+            None
+        );
+    }
+    #[test]
+    fn manual_gesture_during_settling_cancels_placement() {
+        let mut t = Tracker::new();
+        let s = t
+            .on_window_event(1, 2, || Some(0), |_| Readiness::Ready)
+            .unwrap();
+        t.protect(1);
+        t.on_timer(
+            1,
+            s.token,
+            Some(2),
+            |_| Readiness::Ready,
+            |_| panic!("manual move overwritten"),
+        );
+        assert_eq!(t.status(1), "done (placed or protected)");
     }
 }

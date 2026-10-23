@@ -167,16 +167,16 @@ fn readiness_filters_main_windows() {
     assert_eq!(win::readiness(untitled.id(), &r).0, Readiness::NotYet);
 
     let tool = TestWindow::new("wp tool", WS_EX_TOOLWINDOW, null_mut(), Some(SW_SHOWNA));
-    assert_eq!(win::readiness(tool.id(), &r).0, Readiness::Never);
+    assert_eq!(win::readiness(tool.id(), &r).0, Readiness::NotYet);
 
     let topmost = TestWindow::new("wp topmost", WS_EX_TOPMOST, null_mut(), Some(SW_SHOWNA));
-    assert_eq!(win::readiness(topmost.id(), &r).0, Readiness::Never);
+    assert_eq!(win::readiness(topmost.id(), &r).0, Readiness::NotYet);
 
     let owned = TestWindow::new("wp owned", 0, normal.0, Some(SW_SHOWNA));
-    assert_eq!(win::readiness(owned.id(), &r).0, Readiness::Never);
+    assert_eq!(win::readiness(owned.id(), &r).0, Readiness::NotYet);
 
     let minimized = TestWindow::new("wp min", 0, null_mut(), Some(SW_SHOWMINNOACTIVE));
-    assert_eq!(win::readiness(minimized.id(), &r).0, Readiness::Never);
+    assert_eq!(win::readiness(minimized.id(), &r).0, Readiness::NotYet);
 }
 
 #[test]
@@ -249,9 +249,65 @@ fn fullscreen_and_maximized_windows_are_protected_without_focus_change() {
     pump();
     assert_eq!(
         win::readiness(full.id(), &r),
-        (Readiness::Never, "fullscreen")
+        (Readiness::Never, "fullscreen or work-area filling")
     );
     // SAFETY: reading foreground identity only; neither test window was activated.
     assert_ne!(unsafe { GetForegroundWindow() }, full.0);
     assert_ne!(unsafe { GetForegroundWindow() }, maximized.0);
+}
+
+#[test]
+fn work_area_filling_and_title_changes_cannot_bypass_final_safety_gate() {
+    let w = TestWindow::visible("wp protected");
+    let original = win::plan(w.id(), rule(None).rect).unwrap();
+    let work = unsafe {
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = size_of::<MONITORINFO>() as u32;
+        assert_ne!(
+            GetMonitorInfoW(MonitorFromWindow(w.0, MONITOR_DEFAULTTONEAREST), &mut info),
+            0
+        );
+        info.rcWork.into()
+    };
+    win::move_window(w.id(), work);
+    pump();
+    let before = w.rect();
+    let filtered = rule(Some("different startup title"));
+    assert_eq!(win::readiness(w.id(), &filtered).0, Readiness::Never);
+    assert_eq!(
+        win::move_if_ready(w.id(), &filtered, original.target),
+        PlaceOutcome::Failed
+    );
+    pump();
+    let after = w.rect();
+    assert_eq!(
+        (before.left, before.top, before.right, before.bottom),
+        (after.left, after.top, after.right, after.bottom)
+    );
+}
+
+#[test]
+fn temporary_tool_window_can_become_an_eligible_main_window() {
+    use windows_sys::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, SetWindowLongPtrW};
+    let w = TestWindow::new("Wispr Flow", WS_EX_TOOLWINDOW, null_mut(), Some(SW_SHOWNA));
+    let r = rule(Some("Wispr Flow"));
+    let mut tracker = window_placer::tracker::Tracker::new();
+    let pid = win::window_pid(w.id()).unwrap();
+    assert_eq!(
+        tracker.on_window_event(w.id(), pid, || Some(0), |_| win::readiness(w.id(), &r).0),
+        None
+    );
+    unsafe {
+        SetWindowLongPtrW(w.0, GWL_EXSTYLE, 0);
+    }
+    assert!(
+        tracker
+            .on_window_event(
+                w.id(),
+                pid,
+                || unreachable!(),
+                |_| win::readiness(w.id(), &r).0
+            )
+            .is_some()
+    );
 }

@@ -13,7 +13,7 @@ fn main() {
         win::attach_parent_console();
     }
     let background = matches!(&command, Ok(Command::Run(opts)) if opts.apply);
-    if background {
+    if background || matches!(&command, Ok(Command::Run(opts)) if opts.trace) {
         diagnostics::start();
     }
     let code = match command {

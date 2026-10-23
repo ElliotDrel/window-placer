@@ -2,6 +2,7 @@ param(
  [string]$SourceDirectory = (Split-Path $PSScriptRoot -Parent),
  [string]$InstallDirectory = (Join-Path $env:USERPROFILE 'Applications\WindowPlacer'),
  [string]$StartupDirectory = ([Environment]::GetFolderPath('Startup')),
+ [switch]$Trace,
  [switch]$StartNow
 )
 
@@ -39,6 +40,7 @@ $shortcutPath = Join-Path $StartupDirectory 'Window Placer.lnk'
 $shortcut = $shell.CreateShortcut($shortcutPath)
 $shortcut.TargetPath = $exe
 $shortcut.Arguments = '--apply --config "' + $config + '"'
+if ($Trace) { $shortcut.Arguments += ' --trace' }
 $shortcut.WorkingDirectory = $install
 $shortcut.Description = 'Place app windows once using windows.conf'
 $shortcut.Save()
@@ -49,7 +51,7 @@ if((Resolve-Path -LiteralPath $sourceScripts).Path -ne $installedScripts) {
  New-Item -ItemType Directory -Path $installedScripts -Force | Out-Null
  foreach($name in @('install.ps1','start-shortcut.ps1','status.ps1')) { Copy-Item -LiteralPath (Join-Path $sourceScripts $name) -Destination (Join-Path $installedScripts $name) -Force }
 }
-foreach($name in @('Setup.cmd','Status.cmd')) {
+foreach($name in @('Setup.cmd','Status.cmd','Debug.cmd')) {
  $source=Join-Path $SourceDirectory $name; $destination=Join-Path $install $name
  if((Resolve-Path -LiteralPath $source).Path -ne $destination) { Copy-Item -LiteralPath $source -Destination $destination -Force }
 }

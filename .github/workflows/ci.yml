@@ -25,3 +25,10 @@ jobs:
           path: |
             target/release/window-placer.exe
             windows.conf
+            Setup.cmd
+            Status.cmd
+            Debug.cmd
+            scripts/
+            README.md
+            LICENSE
+            docs/

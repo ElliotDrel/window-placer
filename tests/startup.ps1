@@ -10,7 +10,7 @@ $startup=Join-Path $testRoot 'test startup'
 New-Item -ItemType Directory -Path $source -Force|Out-Null
 Copy-Item -LiteralPath $BinaryPath -Destination (Join-Path $source 'window-placer.exe')
 Copy-Item -LiteralPath (Join-Path $repo 'scripts') -Destination $source -Recurse
-Copy-Item -LiteralPath (Join-Path $repo 'Setup.cmd'),(Join-Path $repo 'Status.cmd') -Destination $source
+Copy-Item -LiteralPath (Join-Path $repo 'Setup.cmd'),(Join-Path $repo 'Status.cmd'),(Join-Path $repo 'Debug.cmd') -Destination $source
 # No real app can match this fixture configuration: this test moves no windows.
 'window-placer-startup-test-never.exe | 50 | 50 | 800 | 600'|Set-Content (Join-Path $source 'windows.conf') -Encoding UTF8
 function Literal([string]$value) { return "'"+$value.Replace("'","''")+"'" }
@@ -54,12 +54,13 @@ public static class WindowPlacerJobTest {
 }
 '@
 try {
- $script='$ErrorActionPreference=''Stop''; & '+(Literal (Join-Path $source 'scripts\install.ps1'))+' -SourceDirectory '+(Literal $source)+' -InstallDirectory '+(Literal $install)+' -StartupDirectory '+(Literal $startup)+' -StartNow'
+ $script='$ErrorActionPreference=''Stop''; & '+(Literal (Join-Path $source 'scripts\install.ps1'))+' -SourceDirectory '+(Literal $source)+' -InstallDirectory '+(Literal $install)+' -StartupDirectory '+(Literal $startup)+' -Trace -StartNow'
  $encoded=[Convert]::ToBase64String([Text.Encoding]::Unicode.GetBytes($script))
  [WindowPlacerJobTest]::Run((Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'),'-NoProfile -NonInteractive -WindowStyle Hidden -EncodedCommand '+$encoded)
  Start-Sleep -Seconds 2
  $health=& (Join-Path $repo 'scripts\status.ps1') -InstallDirectory $install -StartupDirectory $startup -AsObject
  if(-not $health.Running -or -not $health.StartupTargetCorrect -or -not $health.StartupArgumentsCorrect) { throw 'Shortcut-launched app did not survive parent job cleanup.' }
+ if(-not $health.TraceEnabled) { throw 'Debug startup flag was not saved or recognized.' }
  $appPid=$health.Pids[0]
  $installedConfig=Join-Path $install 'windows.conf'
  $custom='# keep my settings'+[Environment]::NewLine+'window-placer-startup-test-never.exe | 70 | 80 | 900 | 650'

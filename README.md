@@ -43,6 +43,23 @@ then remove your installed folder when you no longer need its configuration.
 For a portable run, keep the executable and configuration together and launch
 `window-placer.exe --apply`. Stop it in Task Manager or at logoff.
 
+## Diagnose placement issues
+
+Double-click `Debug.cmd` to restart with opt-in decision tracing. It uses the same
+configuration and login shortcut, adding `--trace`. Reproduce the issue, then run
+`Status.cmd` or inspect `window-placer.log` in the installed folder. Double-click
+`Setup.cmd` afterward to turn tracing off. CLI preview: `window-placer.exe --trace
+--duration 30` (moves nothing).
+
+Tracing records executable names, HWND/PID, tracker state, short window titles,
+current/target geometry and skip/move reasons. Logs stay bounded; older entries
+are discarded. Window titles can contain private information: inspect/redact logs
+before sharing them. Tracing is disabled by default and adds no polling or thread.
+A successful asynchronous placement request means Windows accepted the request;
+an app can still enforce minimum sizes or resize itself afterward. Done windows
+are not forced back into place. Reopening the same HWND from the tray preserves
+manual changes; a newly created window is eligible for a fresh placement.
+
 ## Configuration
 
 ```text
@@ -70,7 +87,9 @@ display scaling does not enlarge these physical-pixel dimensions.
 - Wait three seconds after a supported main window becomes ready; place it once.
 - Preserve later manual moves, including after hide/show or title changes.
 - Keep the current monitor and request neither focus nor a stacking-order change.
-- Skip minimized, maximized, fullscreen, cloaked, owned, tool and topmost windows.
+- Never place maximized, fullscreen or work-area-filling windows. A protected state observed during startup settling cancels pending placement.
+- Defer hidden, minimized, cloaked, owned, tool and topmost windows until eligible.
+- Cancel pending placement when the user starts moving/resizing a window.
 - Wait for show/title events if initially hidden or untitled.
 - Bound transient failures to three attempts; reconcile once after queue overflow.
 - Allow one apply instance per session; preview instances move nothing.
@@ -106,7 +125,7 @@ on Windows.
 
 - Apps can reject a size, enforce minimum dimensions or resize themselves later; this utility does not fight them.
 - Inaccessible/elevated windows may be left alone; administrator privileges are not requested.
-- Protected windows stay skipped until the utility restarts.
+- Maximized/fullscreen windows stay protected for their window lifetime. Transient hidden/minimized/tool states can become eligible later.
 - Geometry is tested; real mixed-DPI/multi-monitor hardware needs broader coverage.
 - Use `--duration SECONDS` for a bounded run and `--help` for options.
 - Exit codes: `0` normal, `1` configuration/setup/message-loop failure, `2` bad arguments or duplicate apply instance.

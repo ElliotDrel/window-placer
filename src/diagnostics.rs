@@ -4,9 +4,17 @@ use std::path::Path;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
+static TRACE: AtomicBool = AtomicBool::new(false);
+
 static ENABLED: AtomicBool = AtomicBool::new(false);
 const LIMIT: u64 = 65536;
 
+pub fn set_trace(enabled: bool) {
+    TRACE.store(enabled, Ordering::Relaxed);
+}
+pub fn trace_enabled() -> bool {
+    TRACE.load(Ordering::Relaxed)
+}
 pub fn start() {
     ENABLED.store(true, Ordering::Relaxed);
     std::panic::set_hook(Box::new(|info| record(&format!("panic: {info}"))));

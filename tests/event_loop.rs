@@ -92,7 +92,7 @@ fn wait_for_event(window: WindowId, destroyed: bool) {
                 let found = win::take_events().iter().any(|e| match e {
                     WinEvent::Changed(h) => !destroyed && *h == window,
                     WinEvent::Destroyed(h) => destroyed && *h == window,
-                    WinEvent::Rescan => false,
+                    WinEvent::Rescan | WinEvent::UserMove(_) => false,
                 });
                 if found {
                     win::kill_timer(timeout);

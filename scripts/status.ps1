@@ -14,7 +14,8 @@ $result=[pscustomobject]@{
  Running=($running.Count -eq 1); Pids=@($running.ProcessId); Executable=$exe;
  Configuration=$config; ConfigurationExists=(Test-Path -LiteralPath $config);
  StartupShortcut=$link; StartupTargetCorrect=($target -eq $exe);
- StartupArgumentsCorrect=($arguments -eq ('--apply --config "'+$config+'"'));
+ StartupArgumentsCorrect=($arguments -eq ('--apply --config "'+$config+'"') -or $arguments -eq ('--apply --config "'+$config+'" --trace'));
+ TraceEnabled=($arguments -like '* --trace');
  Diagnostics=(Join-Path $InstallDirectory 'window-placer.log')
 }
 if($AsObject) { return $result }

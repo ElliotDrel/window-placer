@@ -37,12 +37,13 @@ use windows_sys::Win32::UI::HiDpi::{
     DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, SetProcessDpiAwarenessContext,
 };
 use windows_sys::Win32::UI::WindowsAndMessaging::{
-    CHILDID_SELF, DispatchMessageW, EVENT_OBJECT_DESTROY, EVENT_OBJECT_NAMECHANGE,
-    EVENT_OBJECT_SHOW, EnumWindows, GW_OWNER, GWL_EXSTYLE, GWL_STYLE, GetMessageW, GetWindow,
-    GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW, GetWindowTextW,
-    GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed, KillTimer, MSG, OBJID_WINDOW,
-    PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SWP_ASYNCWINDOWPOS, SWP_NOACTIVATE,
-    SWP_NOOWNERZORDER, SWP_NOZORDER, SetTimer, SetWindowPos, WINEVENT_OUTOFCONTEXT,
+    CHILDID_SELF, DispatchMessageW, EVENT_OBJECT_DESTROY, EVENT_OBJECT_LOCATIONCHANGE,
+    EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_SHOW, EVENT_OBJECT_STATECHANGE, EVENT_SYSTEM_MINIMIZEEND,
+    EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MOVESIZESTART, EnumWindows, GW_OWNER, GWL_EXSTYLE,
+    GWL_STYLE, GetMessageW, GetWindow, GetWindowLongPtrW, GetWindowRect, GetWindowTextLengthW,
+    GetWindowTextW, GetWindowThreadProcessId, IsIconic, IsWindowVisible, IsZoomed, KillTimer, MSG,
+    OBJID_WINDOW, PM_NOREMOVE, PeekMessageW, PostThreadMessageW, SWP_ASYNCWINDOWPOS,
+    SWP_NOACTIVATE, SWP_NOOWNERZORDER, SWP_NOZORDER, SetTimer, SetWindowPos, WINEVENT_OUTOFCONTEXT,
     WINEVENT_SKIPOWNPROCESS, WM_APP, WM_QUIT, WM_TIMER, WS_CHILD, WS_EX_TOOLWINDOW, WS_EX_TOPMOST,
 };
 
@@ -189,6 +190,16 @@ pub fn readiness(id: WindowId, rule: &Rule) -> (Readiness, &'static str) {
     if !visible {
         return (Readiness::NotYet, "hidden");
     }
+    // Check protected state before captions: Electron can change its title
+    // while entering fullscreen. A title filter must not hide that transition.
+    if zoomed {
+        return (Readiness::Never, "maximized");
+    }
+    if let (Some(rect), Some(mon)) = (window_rect(id), monitor_of(id))
+        && (rect.covers(&mon.monitor) || rect.covers(&mon.work))
+    {
+        return (Readiness::Never, "fullscreen or work-area filling");
+    }
     // Visible in user32 can still mean hidden on a different virtual desktop.
     let mut cloaked: u32 = 0;
     // SAFETY: cloaked is a live u32 and its exact size is passed to DWM.
@@ -201,16 +212,16 @@ pub fn readiness(id: WindowId, rule: &Rule) -> (Readiness, &'static str) {
         );
     }
     if cloaked != 0 {
-        return (Readiness::Never, "cloaked window");
+        return (Readiness::NotYet, "cloaked window");
     }
     if style & WS_CHILD != 0 || owned {
-        return (Readiness::Never, "child or owned window");
+        return (Readiness::NotYet, "child or owned window");
     }
     if ex_style & WS_EX_TOOLWINDOW != 0 {
-        return (Readiness::Never, "tool window");
+        return (Readiness::NotYet, "tool window");
     }
     if ex_style & WS_EX_TOPMOST != 0 {
-        return (Readiness::Never, "topmost window");
+        return (Readiness::NotYet, "topmost window");
     }
     let title = window_title(id);
     if title.is_empty() {
@@ -220,17 +231,11 @@ pub fn readiness(id: WindowId, rule: &Rule) -> (Readiness, &'static str) {
         return (Readiness::NotYet, "title filter not matched");
     }
     if iconic {
-        return (Readiness::Never, "minimized");
+        return (Readiness::NotYet, "minimized");
     }
-    if zoomed {
-        return (Readiness::Never, "maximized");
-    }
-    let (Some(rect), Some(mon)) = (window_rect(id), monitor_of(id)) else {
+    let (Some(_rect), Some(_mon)) = (window_rect(id), monitor_of(id)) else {
         return (Readiness::NotYet, "window or monitor lookup failed");
     };
-    if rect.covers(&mon.monitor) {
-        return (Readiness::Never, "fullscreen");
-    }
     (Readiness::Ready, "ready")
 }
 
@@ -248,6 +253,14 @@ pub fn plan(id: WindowId, rect: PlacementRect) -> Option<Plan> {
         current,
         target: target_rect(rect, mon.monitor, mon.work),
     })
+}
+
+/// Final safety gate at the actual placement boundary.
+pub fn move_if_ready(id: WindowId, rule: &Rule, to: ScreenRect) -> PlaceOutcome {
+    if readiness(id, rule).0 != Readiness::Ready {
+        return PlaceOutcome::Failed;
+    }
+    move_window(id, to)
 }
 
 /// Move/resize without activating or changing Z-order. Asynchronous so a hung
@@ -301,6 +314,7 @@ pub enum WinEvent {
     /// Top-level window shown or renamed: it may have become ready.
     Changed(WindowId),
     Destroyed(WindowId),
+    UserMove(WindowId),
     /// A bounded queue overflowed: reconcile once instead of losing windows.
     Rescan,
 }
@@ -331,7 +345,13 @@ unsafe extern "system" fn on_win_event(
     }
     let ev = match event {
         EVENT_OBJECT_DESTROY => WinEvent::Destroyed(h as WindowId),
-        EVENT_OBJECT_SHOW | EVENT_OBJECT_NAMECHANGE => {
+        EVENT_SYSTEM_MOVESIZESTART => WinEvent::UserMove(h as WindowId),
+        EVENT_OBJECT_SHOW
+        | EVENT_OBJECT_NAMECHANGE
+        | EVENT_OBJECT_LOCATIONCHANGE
+        | EVENT_OBJECT_STATECHANGE
+        | EVENT_SYSTEM_MINIMIZESTART
+        | EVENT_SYSTEM_MINIMIZEEND => {
             // SAFETY: HWND by value; reject child controls cheaply.
             if unsafe { GetWindowLongPtrW(h, GWL_STYLE) } as u32 & WS_CHILD != 0 {
                 return;
@@ -370,7 +390,7 @@ impl Drop for Hooks {
     }
 }
 
-/// Install out-of-context hooks for DESTROY+SHOW and NAMECHANGE only.
+/// Observe lifecycle, geometry/state changes and user move gestures; no polling.
 /// Must be called on the thread that runs [`next_message`].
 pub fn install_hooks() -> Result<Hooks, u32> {
     // Create the thread queue before a hook or console handler can post to it.
@@ -386,6 +406,10 @@ pub fn install_hooks() -> Result<Hooks, u32> {
     for (min, max) in [
         (EVENT_OBJECT_DESTROY, EVENT_OBJECT_SHOW),
         (EVENT_OBJECT_NAMECHANGE, EVENT_OBJECT_NAMECHANGE),
+        (EVENT_OBJECT_LOCATIONCHANGE, EVENT_OBJECT_LOCATIONCHANGE),
+        (EVENT_OBJECT_STATECHANGE, EVENT_OBJECT_STATECHANGE),
+        (EVENT_SYSTEM_MOVESIZESTART, EVENT_SYSTEM_MOVESIZESTART),
+        (EVENT_SYSTEM_MINIMIZESTART, EVENT_SYSTEM_MINIMIZEEND),
     ] {
         // SAFETY: out-of-context hook with a 'static callback; no module.
         let h = unsafe { SetWinEventHook(min, max, null_mut(), Some(on_win_event), 0, 0, flags) };
