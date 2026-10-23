@@ -195,10 +195,14 @@ pub fn readiness(id: WindowId, rule: &Rule) -> (Readiness, &'static str) {
     if zoomed {
         return (Readiness::Never, "maximized");
     }
-    if let (Some(rect), Some(mon)) = (window_rect(id), monitor_of(id))
-        && (rect.covers(&mon.monitor) || rect.covers(&mon.work))
-    {
-        return (Readiness::Never, "fullscreen or work-area filling");
+    if iconic {
+        return (Readiness::NotYet, "minimized");
+    }
+    let (Some(rect), Some(mon)) = (window_rect(id), monitor_of(id)) else {
+        return (Readiness::NotYet, "window or monitor lookup failed");
+    };
+    if rect.covers(&mon.monitor) {
+        return (Readiness::Never, "fullscreen");
     }
     // Visible in user32 can still mean hidden on a different virtual desktop.
     let mut cloaked: u32 = 0;
@@ -230,12 +234,6 @@ pub fn readiness(id: WindowId, rule: &Rule) -> (Readiness, &'static str) {
     if !title_matches(rule, &title) {
         return (Readiness::NotYet, "title filter not matched");
     }
-    if iconic {
-        return (Readiness::NotYet, "minimized");
-    }
-    let (Some(_rect), Some(_mon)) = (window_rect(id), monitor_of(id)) else {
-        return (Readiness::NotYet, "window or monitor lookup failed");
-    };
     (Readiness::Ready, "ready")
 }
 

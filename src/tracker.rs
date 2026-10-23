@@ -31,7 +31,7 @@ pub enum Readiness {
     Ready,
     /// Temporarily ineligible (hidden, minimized, tool/owned, title); may change later.
     NotYet,
-    /// Maximized/fullscreen/work-area filling: protect for its lifetime.
+    /// Maximized/fullscreen: protect for its lifetime.
     Never,
 }
 

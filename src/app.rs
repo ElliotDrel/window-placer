@@ -245,13 +245,6 @@ fn place(hwnd: WindowId, rule: &Rule, apply: bool, log: &Log) -> PlaceOutcome {
     if !apply {
         return PlaceOutcome::Placed;
     }
-    let (state, reason) = win::readiness(hwnd, rule);
-    if state != Readiness::Ready {
-        log.line(format_args!(
-            "{exe} hwnd {hwnd:#x}: move cancelled ({reason})"
-        ));
-        return PlaceOutcome::Failed;
-    }
     let outcome = win::move_if_ready(hwnd, rule, t);
     log.line(format_args!(
         "{exe} hwnd {hwnd:#x}: placement request {outcome:?}"

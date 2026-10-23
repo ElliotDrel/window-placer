@@ -249,7 +249,7 @@ fn fullscreen_and_maximized_windows_are_protected_without_focus_change() {
     pump();
     assert_eq!(
         win::readiness(full.id(), &r),
-        (Readiness::Never, "fullscreen or work-area filling")
+        (Readiness::Never, "fullscreen")
     );
     // SAFETY: reading foreground identity only; neither test window was activated.
     assert_ne!(unsafe { GetForegroundWindow() }, full.0);
@@ -257,7 +257,7 @@ fn fullscreen_and_maximized_windows_are_protected_without_focus_change() {
 }
 
 #[test]
-fn work_area_filling_and_title_changes_cannot_bypass_final_safety_gate() {
+fn fullscreen_with_a_different_title_cannot_bypass_final_safety_gate() {
     let w = TestWindow::visible("wp protected");
     let original = win::plan(w.id(), rule(None).rect).unwrap();
     let work = unsafe {
@@ -267,7 +267,7 @@ fn work_area_filling_and_title_changes_cannot_bypass_final_safety_gate() {
             GetMonitorInfoW(MonitorFromWindow(w.0, MONITOR_DEFAULTTONEAREST), &mut info),
             0
         );
-        info.rcWork.into()
+        info.rcMonitor.into()
     };
     win::move_window(w.id(), work);
     pump();
@@ -309,5 +309,34 @@ fn temporary_tool_window_can_become_an_eligible_main_window() {
                 |_| win::readiness(w.id(), &r).0
             )
             .is_some()
+    );
+}
+
+#[test]
+fn restored_work_area_sized_window_is_eligible() {
+    let w = TestWindow::visible("wp restored");
+    let area: window_placer::geometry::ScreenRect = unsafe {
+        let mut info: MONITORINFO = std::mem::zeroed();
+        info.cbSize = size_of::<MONITORINFO>() as u32;
+        assert_ne!(
+            GetMonitorInfoW(MonitorFromWindow(w.0, MONITOR_DEFAULTTONEAREST), &mut info),
+            0
+        );
+        let mut area: window_placer::geometry::ScreenRect = info.rcWork.into();
+        let monitor = info.rcMonitor.into();
+        // Some CI desktops have no taskbar. Keep this restored window smaller
+        // than the full monitor so it unambiguously is not fullscreen.
+        if area == monitor {
+            area.bottom -= 1;
+        }
+        area
+    };
+    assert_eq!(win::move_window(w.id(), area), PlaceOutcome::Placed);
+    pump();
+    assert_eq!(win::readiness(w.id(), &rule(None)).0, Readiness::Ready);
+    let target = win::plan(w.id(), rule(None).rect).unwrap().target;
+    assert_eq!(
+        win::move_if_ready(w.id(), &rule(None), target),
+        PlaceOutcome::Placed
     );
 }
