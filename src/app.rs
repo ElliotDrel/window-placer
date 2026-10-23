@@ -117,6 +117,7 @@ struct App {
     rules: Vec<Rule>,
     log: Log,
     tracker: Tracker,
+    trace_snapshots: HashMap<WindowId, String>,
     /// Armed one-shot timers: timer id -> (window, tracker token).
     timers: HashMap<usize, (WindowId, u64)>,
     prune_at: usize,
@@ -133,12 +134,16 @@ impl App {
             && let Some(index) = crate::rules::rule_for_exe(&self.rules, &exe)
         {
             let (_, why) = win::readiness(hwnd, &self.rules[index]);
-            crate::diagnostics::record(&format!(
+            let snapshot = format!(
                 "trace event: {exe} pid={pid} hwnd={hwnd:#x} tracker={} reason={why} title={:?} plan={:?}",
                 self.tracker.status(hwnd),
                 short(&win::window_title(hwnd)),
                 win::plan(hwnd, self.rules[index].rect)
-            ));
+            );
+            if self.trace_snapshots.get(&hwnd) != Some(&snapshot) {
+                crate::diagnostics::record(&snapshot);
+                self.trace_snapshots.insert(hwnd, snapshot);
+            }
         }
         let log = &self.log;
         let rules = &self.rules;
@@ -170,6 +175,8 @@ impl App {
         self.arm(hwnd, schedule);
         if self.tracker.len() > self.prune_at {
             self.tracker.prune(|h, pid| win::window_pid(h) == Some(pid));
+            self.trace_snapshots
+                .retain(|h, _| win::window_pid(*h).is_some());
             self.prune_at = (self.tracker.len() * 2).max(MIN_PRUNE_AT);
         }
     }
@@ -309,6 +316,7 @@ pub fn run(opts: Options) -> i32 {
             remaining: Cell::new(MAX_LOG_LINES),
         },
         tracker: Tracker::new(),
+        trace_snapshots: HashMap::new(),
         timers: HashMap::new(),
         prune_at: MIN_PRUNE_AT,
         timer_failed: false,
@@ -363,7 +371,10 @@ pub fn run(opts: Options) -> i32 {
                                 "hwnd {h:#x}: user move/resize; placement cancelled"
                             ));
                         }
-                        WinEvent::Destroyed(h) => app.tracker.on_destroy(h),
+                        WinEvent::Destroyed(h) => {
+                            app.tracker.on_destroy(h);
+                            app.trace_snapshots.remove(&h);
+                        }
                         WinEvent::Rescan => {
                             app.tracker.prune(|h, pid| win::window_pid(h) == Some(pid));
                             for h in win::top_level_windows() {

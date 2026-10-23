@@ -356,6 +356,18 @@ unsafe extern "system" fn on_win_event(
             if unsafe { GetWindowLongPtrW(h, GWL_STYLE) } as u32 & WS_CHILD != 0 {
                 return;
             }
+            // Chatty overlay movement is irrelevant. If an app drops these
+            // temporary styles later, that event passes and eligibility is
+            // reconsidered. SHOW/NAMECHANGE still provide useful diagnostics.
+            if matches!(
+                event,
+                EVENT_OBJECT_LOCATIONCHANGE | EVENT_OBJECT_STATECHANGE
+            ) && unsafe { GetWindowLongPtrW(h, GWL_EXSTYLE) } as u32
+                & (WS_EX_TOOLWINDOW | WS_EX_TOPMOST)
+                != 0
+            {
+                return;
+            }
             WinEvent::Changed(h as WindowId)
         }
         _ => return,
