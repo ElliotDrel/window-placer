@@ -1,5 +1,8 @@
 # From AutoHotkey polling to Rust events
 
+Historical report: v0.1.1 measurements and v0.1.2 startup validation. For current
+behavior, which supersedes the original event description, see the [README](../README.md).
+
 Window Placer gives applications a useful starting size and position, then leaves
 later manual adjustments alone. Replacing the old AutoHotkey setup with a small
 native Rust program reduced measured background CPU and memory use. The main
@@ -7,8 +10,8 @@ design improvement was replacing repeated searches with Windows events.
 
 ## What changed
 
-The archived [AutoHotkey implementation](../legacy/autohotkey) queried windows
-eleven times per second: 39,600 queries per hour. It coordinated a launcher and
+The archived [AutoHotkey implementation](../legacy/autohotkey) queried eleven apps
+once per second at idle: 39,600 queries per hour. It coordinated a launcher and
 separate app scripts. The Rust implementation loads one configuration, scans once,
 then waits for show, title-change and destroy events. It schedules placement after
 a window becomes ready and remembers that the window has already been handled.
@@ -25,15 +28,18 @@ These samples were taken on the same Windows PC on October 21, 2026, at differen
 times. They are short idle observations, not a simultaneous controlled benchmark.
 The Rust measurements below are from v0.1.1; the startup improvements ship in v0.1.2.
 
-| Metric | AutoHotkey setup | Rust v0.1.1 |
+The table compares the resident window-placement process in each setup. It excludes
+unrelated AHK scripts and short-lived launch-time child processes.
+
+| Metric | AutoHotkey launcher | Rust v0.1.1 |
 | --- | ---: | ---: |
 | Observation time | 30.61 seconds | 20.91 seconds |
 | Process CPU time gained | 0.390625 seconds | 0 seconds detected |
 | Average CPU, one logical core | 1.28% | Below sample resolution |
-| Private committed memory | 4.34 MiB | 1.03–1.13 MiB |
-| Working set | 15.94 MiB | 6.90–6.95 MiB |
+| Private committed memory | 4.34 MiB | 1.03â€“1.13 MiB |
+| Working set | 15.94 MiB | 6.90â€“6.95 MiB |
 
-That is about **3.2–3.3 MiB less private commit (75%)** and **9 MiB less working
+That is about **3.2â€“3.3 MiB less private commit (75%)** and **9 MiB less working
 set (56%)**. These are different memory measures and must not be added together.
 Zero detected CPU growth does not mean the program never uses CPU.
 

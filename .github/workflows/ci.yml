@@ -17,18 +17,16 @@ jobs:
         run: cargo clippy --locked --all-targets -- -D warnings
       - name: Release build
         run: cargo build --locked --release
-      - name: Startup shortcut and launcher lifecycle
-        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/startup.ps1 -BinaryPath target/release/window-placer.exe
+      - name: Stage portable bundle and validate documentation encoding
+        run: |
+          $utf8 = [Text.UTF8Encoding]::new($false, $true)
+          Get-ChildItem README.md,docs -Recurse -File | ForEach-Object { $null = $utf8.GetString([IO.File]::ReadAllBytes($_.FullName)) }
+          New-Item -ItemType Directory -Path dist | Out-Null
+          Copy-Item target/release/window-placer.exe,windows.conf,Setup.cmd,Status.cmd,Debug.cmd,README.md,LICENSE -Destination dist
+          Copy-Item scripts,docs -Destination dist -Recurse
+      - name: Startup shortcut and launcher lifecycle (staged bundle)
+        run: powershell -NoProfile -ExecutionPolicy Bypass -File tests/startup.ps1 -BinaryPath dist/window-placer.exe -SourceDirectory dist
       - uses: actions/upload-artifact@v7.0.2
         with:
           name: window-placer-windows-x64
-          path: |
-            target/release/window-placer.exe
-            windows.conf
-            Setup.cmd
-            Status.cmd
-            Debug.cmd
-            scripts/
-            README.md
-            LICENSE
-            docs/
+          path: dist/

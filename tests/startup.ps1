@@ -1,6 +1,9 @@
-param([Parameter(Mandatory=$true)][string]$BinaryPath)
+param(
+ [Parameter(Mandatory=$true)][string]$BinaryPath,
+ [string]$SourceDirectory = (Split-Path $PSScriptRoot -Parent)
+)
 $ErrorActionPreference='Stop'
-$repo=Split-Path $PSScriptRoot -Parent
+$repo=(Resolve-Path -LiteralPath $SourceDirectory).Path
 $already=@(Get-CimInstance Win32_Process -Filter "Name='window-placer.exe'"|Where-Object {$_.CommandLine -like '*--apply*'})
 if($already.Count) { throw 'Close active Window Placer instances before the isolated installer lifecycle test.' }
 $testRoot=Join-Path ([IO.Path]::GetTempPath()) ('Window Placer Startup Test '+[Guid]::NewGuid())
@@ -34,20 +37,23 @@ public static class WindowPlacerJobTest {
  [DllImport("kernel32.dll")] static extern uint WaitForSingleObject(IntPtr process,uint ms);
  [DllImport("kernel32.dll",SetLastError=true)] static extern bool GetExitCodeProcess(IntPtr process,out uint code);
  [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+ [DllImport("kernel32.dll")] static extern bool TerminateProcess(IntPtr process,uint code);
  public static void Run(string app,string args) {
   IntPtr job=CreateJobObject(IntPtr.Zero,null); if(job==IntPtr.Zero) throw new Win32Exception();
-  var pi=new PI();
+  var pi=new PI(); bool assigned=false;
   try {
    var limits=new Limits(); limits.basic.flags=0x2000|0x800; // kill-on-close + allow breakaway
    if(!SetInformationJobObject(job,9,ref limits,(uint)Marshal.SizeOf(typeof(Limits)))) throw new Win32Exception();
    var si=new SI();si.cb=(uint)Marshal.SizeOf(typeof(SI));si.flags=1;si.show=0;
    if(!CreateProcess(app,new StringBuilder("\""+app+"\" "+args),IntPtr.Zero,IntPtr.Zero,false,0x00000014,IntPtr.Zero,null,ref si,out pi)) throw new Win32Exception();
    if(!AssignProcessToJobObject(job,pi.process)) throw new Win32Exception();
+   assigned=true;
    if(ResumeThread(pi.thread)==0xffffffff) throw new Win32Exception();
    if(WaitForSingleObject(pi.process,120000)!=0) throw new Exception("Installer timed out.");
    uint code;if(!GetExitCodeProcess(pi.process,out code)||code!=0) throw new Exception("Installer failed inside the test job; exit "+code);
   } finally {
    // Closing this job kills ordinary child launches. The app must have escaped.
+   if(pi.process!=IntPtr.Zero && !assigned) TerminateProcess(pi.process,1);
    CloseHandle(job);if(pi.thread!=IntPtr.Zero)CloseHandle(pi.thread);if(pi.process!=IntPtr.Zero)CloseHandle(pi.process);
   }
  }
@@ -61,7 +67,6 @@ try {
  $health=& (Join-Path $repo 'scripts\status.ps1') -InstallDirectory $install -StartupDirectory $startup -AsObject
  if(-not $health.Running -or -not $health.StartupTargetCorrect -or -not $health.StartupArgumentsCorrect) { throw 'Shortcut-launched app did not survive parent job cleanup.' }
  if(-not $health.TraceEnabled) { throw 'Debug startup flag was not saved or recognized.' }
- $appPid=$health.Pids[0]
  $installedConfig=Join-Path $install 'windows.conf'
  $custom='# keep my settings'+[Environment]::NewLine+'window-placer-startup-test-never.exe | 70 | 80 | 900 | 650'
  [IO.File]::WriteAllText($installedConfig,$custom)

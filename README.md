@@ -83,11 +83,11 @@ display scaling does not enlarge these physical-pixel dimensions.
 
 ## Behavior
 
-- Scan once at startup, then listen for show, title-change and destroy events.
+- Scan once at startup, then listen for lifecycle, geometry/state and user-move events.
 - Wait three seconds after a supported main window becomes ready; place it once.
 - Preserve later manual moves, including after hide/show or title changes.
 - Keep the current monitor and request neither focus nor a stacking-order change.
-- Never place maximized, fullscreen or work-area-filling windows. A protected state observed during startup settling cancels pending placement.
+- Never place maximized or fullscreen windows. A protected state observed during startup settling cancels pending placement.
 - Defer hidden, minimized, cloaked, owned, tool and topmost windows until eligible.
 - Cancel pending placement when the user starts moving/resizing a window.
 - Wait for show/title events if initially hidden or untitled.
@@ -119,7 +119,7 @@ parent test. The startup test requires closing any running apply instance first.
 uses a temporary configuration that matches no real app, launches the actual shortcut
 inside a disposable Windows job, and checks survival after that job closes, paths with
 spaces, configuration preservation and failed-install isolation. CI runs these checks
-on Windows.
+on Windows. CI tests the staged portable bundle and rejects invalid UTF-8 in published documentation.
 
 ## Limits
 
@@ -130,6 +130,9 @@ on Windows.
 - Use `--duration SECONDS` for a bounded run and `--help` for options.
 - Exit codes: `0` normal, `1` configuration/setup/message-loop failure, `2` bad arguments or duplicate apply instance.
 - Background apply mode never attaches to the launching terminal. Release builds have no console window; redirect output or use `cargo run` for diagnostics.
+
+Restored windows that fill only the work area remain eligible. Work-area coverage
+is not treated as fullscreen; explicit maximization and full-monitor coverage are.
 
 ## Migration measurements
 
