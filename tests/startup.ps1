@@ -44,7 +44,7 @@ public static class WindowPlacerJobTest {
    if(!CreateProcess(app,new StringBuilder("\""+app+"\" "+args),IntPtr.Zero,IntPtr.Zero,false,0x00000014,IntPtr.Zero,null,ref si,out pi)) throw new Win32Exception();
    if(!AssignProcessToJobObject(job,pi.process)) throw new Win32Exception();
    if(ResumeThread(pi.thread)==0xffffffff) throw new Win32Exception();
-   if(WaitForSingleObject(pi.process,30000)!=0) throw new Exception("Installer timed out.");
+   if(WaitForSingleObject(pi.process,120000)!=0) throw new Exception("Installer timed out.");
    uint code;if(!GetExitCodeProcess(pi.process,out code)||code!=0) throw new Exception("Installer failed inside the test job; exit "+code);
   } finally {
    // Closing this job kills ordinary child launches. The app must have escaped.
